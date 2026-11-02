@@ -1,0 +1,12 @@
+node_modules/
+.env
+.DS_Store
+*.log
+.netlify
+dist/
+build/
+.cache/
+.vscode/
+.idea/
+*.swp
+*.swo
