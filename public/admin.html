@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Labs Admin - Learning Dots</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+        }
+
+        .nav {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .nav a:hover {
+            background: #f0f0f0;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+        }
+
+        tr:hover {
+            background: #fafafa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-active { background: #d4edda; color: #155724; }
+        .badge-closed { background: #f8d7da; color: #721c24; }
+        .badge-archived { background: #e2e3e5; color: #383d41; }
+        .badge-free { background: #d1ecf1; color: #0c5460; }
+        .badge-pro { background: #d4edda; color: #155724; }
+        .badge-enterprise { background: #fff3cd; color: #856404; }
+
+        .workspace-row {
+            cursor: pointer;
+        }
+
+        .workspace-details {
+            display: none;
+            background: #f9f9f9;
+            padding: 20px;
+        }
+
+        .workspace-details.expanded {
+            display: block;
+        }
+
+        .members-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .member-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .member-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .member-info {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .lab-count {
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 4px;
+            font-size: 13px;
+            display: inline-block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .refresh-btn:hover {
+            background: #5568d3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Labs Admin Dashboard</h1>
+            <p class="subtitle">Manage workspaces and lab resources</p>
+            <div class="nav">
+                <a href="/">My Labs</a>
+                <a href="/admin">Admin</a>
+            </div>
+        </header>
+
+        <div class="card">
+            <h2>Overview Statistics</h2>
+            <div id="stats-container" class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-workspaces">-</div>
+                    <div class="stat-label">Active Workspaces</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-labs">-</div>
+                    <div class="stat-label">Total Labs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-ready">-</div>
+                    <div class="stat-label">Ready Labs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-provisioning">-</div>
+                    <div class="stat-label">Provisioning</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Workspaces</h2>
+            <div class="filter-group">
+                <select id="tenant-filter">
+                    <option value="">All Tenants</option>
+                </select>
+                <button class="refresh-btn" onclick="loadAllData()">Refresh</button>
+            </div>
+            <div id="workspaces-container" class="loading">Loading workspaces...</div>
+        </div>
+    </div>
+
+    <script src="/admin.js"></script>
+</body>
+</html>
