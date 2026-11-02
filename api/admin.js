@@ -25,19 +25,23 @@ router.get('/courses', async (req, res) => {
 
 router.get('/workspaces', async (req, res) => {
   try {
-    const { tenantId } = req.query;
+    const { tenantId, trainerId } = req.query;
     
     let query = supabaseAdmin
       .from('lab_workspaces')
       .select(`
         *,
-        tenant:lab_tenants(id, name, slug, plan),
+        tenant:lab_tenants(id, name, slug, plan, subscription_status),
         _count:lab_workspace_members(count)
       `)
       .order('created_at', { ascending: false });
 
     if (tenantId) {
       query = query.eq('tenant_id', tenantId);
+    }
+
+    if (trainerId) {
+      query = query.eq('trainer_user_id', trainerId);
     }
 
     const { data: workspaces, error } = await query;
@@ -64,17 +68,19 @@ router.get('/workspaces', async (req, res) => {
       resources.forEach(r => {
         if (!resourceCounts[r.workspace_id]) {
           resourceCounts[r.workspace_id] = {
-            total: 0,
-            provisioning: 0,
-            ready: 0,
-            stopped: 0,
-            failed: 0
+        total: 0,
+        provisioning: 0,
+        ready: 0,
+        stopped: 0,
+        suspended: 0,
+        failed: 0
           };
         }
         resourceCounts[r.workspace_id].total++;
         if (r.status === 'provisioning') resourceCounts[r.workspace_id].provisioning++;
         if (r.status === 'ready') resourceCounts[r.workspace_id].ready++;
         if (r.status === 'stopped') resourceCounts[r.workspace_id].stopped++;
+        if (r.status === 'suspended') resourceCounts[r.workspace_id].suspended++;
         if (r.status === 'failed') resourceCounts[r.workspace_id].failed++;
       });
     }
@@ -86,6 +92,7 @@ router.get('/workspaces', async (req, res) => {
         provisioning: 0,
         ready: 0,
         stopped: 0,
+        suspended: 0,
         failed: 0
       }
     }));
@@ -106,7 +113,7 @@ router.get('/workspace/:workspaceId/stats', async (req, res) => {
       .from('lab_workspaces')
       .select(`
         *,
-        tenant:lab_tenants(id, name, slug, plan)
+        tenant:lab_tenants(id, name, slug, plan, subscription_status)
       `)
       .eq('id', workspaceId)
       .single();
@@ -170,7 +177,8 @@ router.get('/workspace/:workspaceId/stats', async (req, res) => {
         total_labs: resources.filter(r => !r.deleted_at).length,
         active_labs: resources.filter(r => !r.deleted_at && ['provisioning', 'ready', 'stopped'].includes(r.status)).length,
         ready_labs: resources.filter(r => !r.deleted_at && r.status === 'ready').length,
-        stopped_labs: resources.filter(r => !r.deleted_at && r.status === 'stopped').length
+        stopped_labs: resources.filter(r => !r.deleted_at && r.status === 'stopped').length,
+        suspended_labs: resources.filter(r => !r.deleted_at && r.status === 'suspended').length
       }
     };
 

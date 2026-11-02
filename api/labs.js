@@ -30,6 +30,22 @@ async function teardownLab(labId) {
   return { success: true };
 }
 
+async function stopLab(labId) {
+  console.log('Stopping lab:', labId);
+  
+  await new Promise(resolve => setTimeout(resolve, 300));
+  
+  return { success: true };
+}
+
+async function startLab(labId) {
+  console.log('Starting lab:', labId);
+  
+  await new Promise(resolve => setTimeout(resolve, 300));
+  
+  return { success: true };
+}
+
 router.post('/create', async (req, res) => {
   try {
     const { workspaceId, userId, courseId, labType } = req.body;
@@ -50,6 +66,15 @@ router.post('/create', async (req, res) => {
 
     if (workspace.status === 'closed' || workspace.status === 'archived') {
       return res.status(400).json({ error: 'Workspace is not active' });
+    }
+
+    // Check tenant subscription status
+    if (!workspace.tenant || workspace.tenant.subscription_status !== 'active') {
+      return res.status(403).json({ 
+        error: 'Tenant subscription is not active',
+        subscription_status: workspace.tenant?.subscription_status || 'unknown',
+        message: 'Cannot create new labs while tenant subscription is suspended or inactive'
+      });
     }
 
     const { data: member, error: memberError } = await supabaseAdmin
@@ -416,6 +441,180 @@ router.post('/cleanup-member', async (req, res) => {
 
   } catch (error) {
     console.error('Error in /cleanup-member:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/suspend-tenant', async (req, res) => {
+  try {
+    const { tenantId } = req.body;
+    
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Missing tenant ID' });
+    }
+
+    // Get all workspaces for this tenant
+    const { data: workspaces, error: workspacesError } = await supabaseAdmin
+      .from('lab_workspaces')
+      .select('id')
+      .eq('tenant_id', tenantId);
+
+    if (workspacesError) {
+      console.error('Error fetching workspaces:', workspacesError);
+      return res.status(500).json({ error: 'Failed to fetch workspaces' });
+    }
+
+    if (!workspaces || workspaces.length === 0) {
+      return res.json({ 
+        success: true, 
+        message: 'No workspaces found for tenant',
+        suspended: 0
+      });
+    }
+
+    const workspaceIds = workspaces.map(w => w.id);
+
+    // Get all running labs for these workspaces
+    const { data: resources, error: resourcesError } = await supabaseAdmin
+      .from('lab_workspace_resources')
+      .select('*')
+      .in('workspace_id', workspaceIds)
+      .is('deleted_at', null)
+      .in('status', ['provisioning', 'ready', 'stopped']);
+
+    if (resourcesError) {
+      console.error('Error fetching resources:', resourcesError);
+      return res.status(500).json({ error: 'Failed to fetch resources' });
+    }
+
+    let suspended = 0;
+    for (const resource of resources) {
+      // Store previous status in usage metadata
+      const previousStatus = resource.status;
+      const updatedUsage = {
+        ...(resource.usage || {}),
+        suspended_at: new Date().toISOString(),
+        previous_status: previousStatus,
+        suspension_reason: 'tenant_subscription_inactive'
+      };
+
+      await supabaseAdmin
+        .from('lab_workspace_resources')
+        .update({ 
+          status: 'suspended',
+          usage: updatedUsage
+        })
+        .eq('id', resource.id);
+
+      // Stop the lab if it's running
+      if (resource.status === 'ready' && resource.external_ref && resource.external_ref !== 'pending') {
+        stopLab(resource.external_ref).catch(error => {
+          console.error(`Failed to stop lab ${resource.external_ref}:`, error);
+        });
+      }
+      
+      suspended++;
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Suspended ${suspended} lab(s) for tenant`,
+      tenantId,
+      suspended,
+      workspaces: workspaceIds.length
+    });
+
+  } catch (error) {
+    console.error('Error in /suspend-tenant:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reactivate-tenant', async (req, res) => {
+  try {
+    const { tenantId } = req.body;
+    
+    if (!tenantId) {
+      return res.status(400).json({ error: 'Missing tenant ID' });
+    }
+
+    // Get all workspaces for this tenant
+    const { data: workspaces, error: workspacesError } = await supabaseAdmin
+      .from('lab_workspaces')
+      .select('id')
+      .eq('tenant_id', tenantId);
+
+    if (workspacesError) {
+      console.error('Error fetching workspaces:', workspacesError);
+      return res.status(500).json({ error: 'Failed to fetch workspaces' });
+    }
+
+    if (!workspaces || workspaces.length === 0) {
+      return res.json({ 
+        success: true, 
+        message: 'No workspaces found for tenant',
+        reactivated: 0
+      });
+    }
+
+    const workspaceIds = workspaces.map(w => w.id);
+
+    // Get all suspended labs for these workspaces
+    const { data: resources, error: resourcesError } = await supabaseAdmin
+      .from('lab_workspace_resources')
+      .select('*')
+      .in('workspace_id', workspaceIds)
+      .is('deleted_at', null)
+      .eq('status', 'suspended');
+
+    if (resourcesError) {
+      console.error('Error fetching resources:', resourcesError);
+      return res.status(500).json({ error: 'Failed to fetch resources' });
+    }
+
+    let reactivated = 0;
+    for (const resource of resources) {
+      // Restore to previous status or default to 'stopped'
+      const previousStatus = resource.usage?.previous_status;
+      let newStatus = 'stopped';
+      
+      if (previousStatus === 'ready' || previousStatus === 'stopped') {
+        newStatus = previousStatus;
+      }
+
+      const updatedUsage = {
+        ...(resource.usage || {}),
+        reactivated_at: new Date().toISOString()
+      };
+
+      await supabaseAdmin
+        .from('lab_workspace_resources')
+        .update({ 
+          status: newStatus,
+          usage: updatedUsage
+        })
+        .eq('id', resource.id);
+
+      // Restart the lab if it was previously ready
+      if (newStatus === 'ready' && resource.external_ref && resource.external_ref !== 'pending') {
+        startLab(resource.external_ref).catch(error => {
+          console.error(`Failed to start lab ${resource.external_ref}:`, error);
+        });
+      }
+      
+      reactivated++;
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Reactivated ${reactivated} lab(s) for tenant`,
+      tenantId,
+      reactivated,
+      workspaces: workspaceIds.length
+    });
+
+  } catch (error) {
+    console.error('Error in /reactivate-tenant:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

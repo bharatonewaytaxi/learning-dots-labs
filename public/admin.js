@@ -102,13 +102,15 @@ function renderWorkspaces() {
         const statusBadge = `<span class="badge badge-${workspace.status}">${workspace.status}</span>`;
         const planBadge = workspace.tenant?.plan ? 
             `<span class="badge badge-${workspace.tenant.plan}">${workspace.tenant.plan}</span>` : '';
+        const subscriptionBadge = workspace.tenant?.subscription_status !== 'active' ?
+            `<span class="badge badge-suspended">⚠️ ${workspace.tenant.subscription_status}</span>` : '';
         
         const stats = workspace.resource_stats || {};
-        const labsInfo = `${stats.ready || 0} ready / ${stats.total || 0} total`;
+        const labsInfo = `${stats.ready || 0} ready / ${stats.total || 0} total${stats.suspended ? ` (${stats.suspended} suspended)` : ''}`;
         
         row.innerHTML = `
             <td><strong>${workspace.name}</strong></td>
-            <td>${workspace.tenant?.name || 'N/A'} ${planBadge}</td>
+            <td>${workspace.tenant?.name || 'N/A'} ${planBadge} ${subscriptionBadge}</td>
             <td>${workspace.course_id || 'Not set'}</td>
             <td>${statusBadge}</td>
             <td>${labsInfo}</td>
@@ -160,6 +162,8 @@ function renderWorkspaceDetails(workspaceId, data) {
         <div style="margin-bottom: 20px;">
             <h3>${workspace.name}</h3>
             <p><strong>Description:</strong> ${workspace.description || 'No description'}</p>
+            <p><strong>Tenant:</strong> ${workspace.tenant?.name} (${workspace.tenant?.plan})</p>
+            <p><strong>Subscription Status:</strong> <span class="badge badge-${workspace.tenant?.subscription_status === 'active' ? 'active' : 'suspended'}">${workspace.tenant?.subscription_status || 'unknown'}</span></p>
             <p><strong>Start Date:</strong> ${workspace.start_date ? new Date(workspace.start_date).toLocaleDateString() : 'Not set'}</p>
             <p><strong>End Date:</strong> ${workspace.end_date ? new Date(workspace.end_date).toLocaleDateString() : 'Not set'}</p>
         </div>
@@ -183,6 +187,12 @@ function renderWorkspaceDetails(workspaceId, data) {
                     <div class="stat-value">${totals.active_labs}</div>
                     <div class="stat-label">Active Labs</div>
                 </div>
+                ${totals.suspended_labs > 0 ? `
+                <div class="stat-card" style="background: linear-gradient(135deg, #868f96 0%, #596164 100%);">
+                    <div class="stat-value">${totals.suspended_labs}</div>
+                    <div class="stat-label">Suspended Labs</div>
+                </div>
+                ` : ''}
             </div>
         </div>
 

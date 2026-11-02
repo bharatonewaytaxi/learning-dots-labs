@@ -11,9 +11,9 @@
 ```bash
 # Via Supabase Dashboard:
 # 1. Go to SQL Editor
-# 2. Copy contents of: supabase/migrations/20261102000000_lab_tenancy_model.sql
-# 3. Run the migration
-# 4. Verify tables created: lab_tenants, lab_workspaces, lab_workspace_resources, etc.
+# 2. First, run migration 023: supabase/migrations/20261102000000_lab_tenancy_model.sql
+# 3. Then, run migration 024: supabase/migrations/20261102000001_tenant_suspension_trainer_access.sql
+# 4. Verify tables created: lab_tenants (with subscription_status), lab_workspaces, lab_workspace_resources, etc.
 ```
 
 ### 2. Create Test Data (1 min)
@@ -126,6 +126,62 @@ curl http://localhost:3000/api/labs/user/learner-002
 # Should show lab with status "ready"
 ```
 
+### ✅ Test 6: Tenant Suspension (1 minute) **NEW**
+```bash
+# 1. Suspend tenant (replace TENANT_ID):
+curl -X POST http://localhost:3000/api/labs/suspend-tenant \
+  -H "Content-Type: application/json" \
+  -d '{"tenantId": "YOUR_TENANT_ID"}'
+
+# Expected: {"success":true,"message":"Suspended X lab(s) for tenant",...}
+
+# 2. Check admin dashboard - all labs should show "suspended"
+
+# 3. Try to create new lab - should be blocked:
+curl -X POST http://localhost:3000/api/labs/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspaceId": "YOUR_WORKSPACE_ID",
+    "userId": "learner-001",
+    "courseId": "k8s-fundamentals"
+  }'
+
+# Expected: {"error":"Tenant subscription is not active",...}
+
+# 4. Reactivate tenant:
+curl -X POST http://localhost:3000/api/labs/reactivate-tenant \
+  -H "Content-Type: application/json" \
+  -d '{"tenantId": "YOUR_TENANT_ID"}'
+
+# Expected: {"success":true,"message":"Reactivated X lab(s) for tenant",...}
+
+# 5. Verify labs restored in admin dashboard
+```
+
+### ✅ Test 7: Database Trigger for Suspension (30 seconds) **NEW**
+```sql
+-- In Supabase SQL Editor:
+
+-- 1. Suspend via database update:
+UPDATE lab_tenants 
+SET subscription_status = 'suspended' 
+WHERE id = 'YOUR_TENANT_ID';
+
+-- Check lab_workspace_resources - status should be 'suspended'
+SELECT id, status, usage->>'suspended_at', usage->>'previous_status'
+FROM lab_workspace_resources
+WHERE workspace_id IN (
+  SELECT id FROM lab_workspaces WHERE tenant_id = 'YOUR_TENANT_ID'
+);
+
+-- 2. Reactivate via database:
+UPDATE lab_tenants 
+SET subscription_status = 'active' 
+WHERE id = 'YOUR_TENANT_ID';
+
+-- Labs should be restored to previous status
+```
+
 ## Verification Checklist
 
 After testing, verify in Supabase SQL Editor:
@@ -167,12 +223,17 @@ GROUP BY status;
 
 ## Success Criteria
 
-✅ Database migration applied without errors
-✅ Test data created (tenant, workspace, members)
+✅ Database migrations 023 and 024 applied without errors
+✅ Test data created (tenant with subscription_status, workspace, members)
 ✅ Application runs on http://localhost:3000
 ✅ Can request labs from main interface
 ✅ Labs show correct status progression (provisioning → ready)
-✅ Admin dashboard displays workspaces and member stats
+✅ **Lab creation blocked when tenant subscription_status is not 'active'**
+✅ **Tenant suspension stops all labs and marks them 'suspended'**
+✅ **Tenant reactivation restores labs to previous status**
+✅ **Database trigger automatically suspends/reactivates labs on subscription change**
+✅ Admin dashboard displays workspaces with subscription status warnings
+✅ Admin dashboard shows suspended lab counts
 ✅ Can view lab seats per workspace member
 ✅ Lab lifecycle operations work (stop, start, delete)
 ✅ Workspace cleanup marks all labs as expired

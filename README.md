@@ -16,22 +16,28 @@ Learning Dots Labs provides a comprehensive platform for managing virtual labs w
 
 ### Database Schema
 
-The application uses the following tables (created by migration 023):
+The application uses the following tables (created by migrations 023 and 024):
 
-- `lab_tenants`: Organizations/companies with plans (free, pro, enterprise)
+- `lab_tenants`: Organizations/companies with plans (free, pro, enterprise) and subscription_status
 - `lab_tenant_users`: Tenant members (users belonging to tenants)
 - `lab_user_roles`: User roles within tenants (tenantadmin, member)
 - `lab_workspaces`: Training workspaces with assigned trainers and courses
 - `lab_workspace_members`: Workspace members (trainer, learner, observer)
-- `lab_workspace_resources`: Lab resources assigned to learners (NEW)
+- `lab_workspace_resources`: Lab resources assigned to learners (with suspension support)
 - `lab_courses`: Master course definitions with lab templates
+
+**Migration 024 additions**:
+- `subscription_status` field on lab_tenants (active, suspended, cancelled, expired)
+- Database functions for tenant suspension/reactivation
+- Automatic trigger on subscription status changes
+- Enhanced RLS policies for trainer access to their workspace members and labs
 
 ### Key Features
 
 1. **Lab Creation**: When a learner requests a lab in a workspace, a record is created in `lab_workspace_resources` with:
    - `kind`: 'lab'
    - `external_ref`: VM/lab ID from provisioning system
-   - `status`: provisioning → ready → stopped → expired/deleted
+   - `status`: provisioning → ready → stopped → suspended → expired/deleted
    - `usage`: JSON tracking connection info, timestamps, metrics
    - `expires_at`: Automatic expiration date
 
@@ -39,20 +45,34 @@ The application uses the following tables (created by migration 023):
    - `provisioning`: Lab is being created
    - `ready`: Lab is available for use
    - `stopped`: Lab is temporarily stopped
+   - `suspended`: Tenant subscription inactive (automatically managed)
    - `failed`: Provisioning failed
    - `expired`: Workspace ended
    - `deleted`: Torn down and removed
 
-3. **Automatic Cleanup**:
+3. **Tenant Subscription Management** (NEW):
+   - When tenant `subscription_status` becomes inactive: all labs automatically suspended and stopped
+   - New lab creation blocked while subscription is inactive
+   - When subscription reactivated: suspended labs restored to previous state
+   - Database trigger handles suspension/reactivation automatically
+   - Manual API endpoints available for forced suspension/reactivation
+
+4. **Automatic Cleanup**:
    - When a workspace is closed or end date passed: all labs marked expired and torn down
    - When a member is removed: their labs are revoked and torn down
    - Service role is used for all resource operations (never exposed to browser)
 
-4. **Admin Dashboard**: Shows:
-   - Workspace overview with lab counts
+5. **Admin Dashboard**: Shows:
+   - Workspace overview with lab counts (including suspended)
    - Per-workspace member lists with lab seat assignments
    - Real-time status of all labs
    - Filtering by tenant
+   - Subscription status warnings
+
+6. **Trainer Access** (Migration 024):
+   - Trainers can view their assigned workspace members
+   - Trainers can view labs of learners in their workspaces
+   - RLS policies grant read access to trainers for their workspaces
 
 ## Setup
 
@@ -136,13 +156,29 @@ The application will be available at `http://localhost:3000`
   - Called when member is removed from workspace
   - Marks their labs as revoked and tears them down
 
+- `POST /api/labs/suspend-tenant` - Suspend all labs for a tenant (NEW)
+  - Body: `{ tenantId }`
+  - Stops all running labs and marks as 'suspended'
+  - Stores previous status for later restoration
+  - Typically called when subscription becomes inactive
+
+- `POST /api/labs/reactivate-tenant` - Reactivate suspended labs (NEW)
+  - Body: `{ tenantId }`
+  - Restores labs to previous status (ready/stopped)
+  - Restarts labs that were previously ready
+  - Called when subscription becomes active again
+
+**Note**: Lab creation automatically checks tenant `subscription_status` and blocks creation if not 'active'.
+
 ### Admin API (`/api/admin`)
 
 - `GET /api/admin/courses` - Get all active courses from master list
 - `GET /api/admin/workspaces` - List all workspaces with lab counts
   - Query param: `tenantId` (optional) - filter by tenant
+  - Query param: `trainerId` (optional) - filter by assigned trainer
 - `GET /api/admin/workspace/:workspaceId/stats` - Detailed workspace stats
   - Returns members with their lab seat assignments
+  - Respects trainer access (trainers can view their workspace stats)
 - `GET /api/admin/tenants` - List all tenants
 - `GET /api/admin/resources/stats` - Overall resource statistics
   - Query params: `tenantId`, `workspaceId` (optional filters)
@@ -214,6 +250,39 @@ VALUES
      ```
    - Verify member's labs are marked "revoked"
 
+7. **Test Tenant Suspension** (NEW):
+   - Suspend tenant and all labs:
+     ```bash
+     curl -X POST http://localhost:3000/api/labs/suspend-tenant \
+       -H "Content-Type: application/json" \
+       -d '{"tenantId": "TENANT_ID_HERE"}'
+     ```
+   - Verify all labs marked "suspended" in admin dashboard
+   - Try to create new lab - should be blocked with error
+   - Reactivate tenant:
+     ```bash
+     curl -X POST http://localhost:3000/api/labs/reactivate-tenant \
+       -H "Content-Type: application/json" \
+       -d '{"tenantId": "TENANT_ID_HERE"}'
+     ```
+   - Verify labs restored to previous status
+
+8. **Test Database Trigger** (NEW):
+   - Update tenant subscription_status via SQL:
+     ```sql
+     UPDATE lab_tenants 
+     SET subscription_status = 'suspended' 
+     WHERE id = 'TENANT_ID_HERE';
+     ```
+   - Check that labs are automatically suspended
+   - Restore subscription:
+     ```sql
+     UPDATE lab_tenants 
+     SET subscription_status = 'active' 
+     WHERE id = 'TENANT_ID_HERE';
+     ```
+   - Check that labs are automatically reactivated
+
 ### Automated Testing
 
 The application currently uses mock lab provisioning (simulates 1 second delay). To integrate with real lab infrastructure:
@@ -249,7 +318,21 @@ The GitHub Actions workflow (`.github/workflows/docker-build.yml`) automatically
 
 ## Database Migration Notes
 
-The migration file (`supabase/migrations/20261102000000_lab_tenancy_model.sql`) is:
+The migration files are:
+
+1. **Migration 023** (`supabase/migrations/20261102000000_lab_tenancy_model.sql`):
+   - Core lab tenancy tables
+   - RLS policies for tenant isolation
+   - Lab workspace and resource tracking
+   - Course master list
+
+2. **Migration 024** (`supabase/migrations/20261102000001_tenant_suspension_trainer_access.sql`):
+   - `subscription_status` field on lab_tenants
+   - Suspension/reactivation functions
+   - Database trigger for automatic suspension
+   - Enhanced RLS policies for trainer access
+
+Both migrations are:
 - **Additive only**: Safe to run on existing database
 - **Idempotent**: Uses `IF NOT EXISTS` clauses
 - **RLS enabled**: All tables have Row Level Security
@@ -260,7 +343,7 @@ To apply:
 # Via Supabase CLI
 supabase db push
 
-# Or run the SQL directly in Supabase Dashboard
+# Or run the SQL directly in Supabase Dashboard (in order: 023 then 024)
 ```
 
 ## Security Notes

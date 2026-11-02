@@ -108,6 +108,7 @@ function renderLabs() {
                 ${lab.status === 'ready' ? `<button onclick="connectToLab('${lab.id}')">Connect</button>` : ''}
                 ${lab.status === 'stopped' ? `<button class="btn-secondary" onclick="startLab('${lab.id}')">Start</button>` : ''}
                 ${lab.status === 'ready' ? `<button class="btn-secondary" onclick="stopLab('${lab.id}')">Stop</button>` : ''}
+                ${lab.status === 'suspended' ? `<div style="font-size: 12px; color: #666; margin-top: 8px;">Suspended - Tenant subscription inactive</div>` : ''}
                 ${['ready', 'stopped'].includes(lab.status) ? `<button class="btn-danger" onclick="deleteLab('${lab.id}')">Delete</button>` : ''}
             </div>
         `;
